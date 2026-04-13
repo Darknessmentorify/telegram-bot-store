@@ -1,9 +1,6 @@
 import telebot
 from telebot.types import ReplyKeyboardMarkup
-import json
-import os
-
-# ================= CONFIG =================
+import json, os
 
 TOKEN = os.getenv("TOKEN")
 
@@ -27,12 +24,10 @@ def load_db():
             "recharges": [],
             "welcome": "Bienvenido"
         }
-    with open(DB_FILE, "r") as f:
-        return json.load(f)
+    return json.load(open(DB_FILE))
 
 def save_db():
-    with open(DB_FILE, "w") as f:
-        json.dump(db, f, indent=4)
+    json.dump(db, open(DB_FILE, "w"), indent=4)
 
 db = load_db()
 
@@ -58,13 +53,9 @@ def menu_admin():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("📦 Productos", "📢 Broadcast")
     kb.add("💰 Recargas", "📜 Compras")
+    kb.add("👥 Usuarios", "📊 Estadísticas")
     kb.add("✏️ Bienvenida")
     kb.add("🚪 Salir")
-    return kb
-
-def cancel():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("❌ Cancelar")
     return kb
 
 # ================= START =================
@@ -85,9 +76,6 @@ def start(msg):
 def comprar(msg):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
 
-    if not db["products"]:
-        return bot.send_message(msg.chat.id, "❌ No hay productos aún")
-
     for p in db["products"]:
         kb.add(p)
 
@@ -100,15 +88,9 @@ def producto(msg):
     states[msg.chat.id] = "precio"
 
     precios = db["products"][msg.text]
+    text = "Precios:\n" + "\n".join(precios)
 
-    if not precios:
-        return bot.send_message(msg.chat.id, "❌ Sin precios definidos")
-
-    text = "Precios disponibles:\n"
-    for p in precios:
-        text += f"- {p}\n"
-
-    bot.send_message(msg.chat.id, text + "\nEscribe el precio exacto:")
+    bot.send_message(msg.chat.id, text + "\nEscribe precio:")
 
 @bot.message_handler(func=lambda m: states.get(m.chat.id) == "precio")
 def comprar_precio(msg):
@@ -124,7 +106,7 @@ def comprar_precio(msg):
     if db["users"][uid]["saldo"] < precio:
         return bot.send_message(msg.chat.id, "❌ Saldo insuficiente")
 
-    if producto not in db["keys"] or not db["keys"][producto]:
+    if not db["keys"].get(producto):
         return bot.send_message(msg.chat.id, "❌ Sin stock")
 
     key = db["keys"][producto].pop(0)
@@ -134,86 +116,88 @@ def comprar_precio(msg):
 
     save_db()
 
-    bot.send_message(msg.chat.id, f"✅ Compra exitosa\n\n🔑 {key}", reply_markup=menu_user())
+    bot.send_message(msg.chat.id, f"✅ Compra\n🔑 {key}", reply_markup=menu_user())
     states[msg.chat.id] = None
 
 @bot.message_handler(func=lambda m: m.text == "💰 Saldo")
 def saldo(msg):
     uid = str(msg.chat.id)
-    saldo = db["users"][uid]["saldo"]
-
-    bot.send_message(msg.chat.id, f"💰 Tu saldo: ${saldo}\n\n¿Deseas recargar? Escribe monto")
-
+    bot.send_message(msg.chat.id, f"💰 ${db['users'][uid]['saldo']}\nEscribe monto para recargar")
     states[msg.chat.id] = "recarga"
 
 @bot.message_handler(func=lambda m: states.get(m.chat.id) == "recarga")
-def pedir_recarga(msg):
+def recarga(msg):
     uid = str(msg.chat.id)
-
-    if not msg.text.isdigit():
-        return bot.send_message(msg.chat.id, "❌ Solo números")
-
-    monto = int(msg.text)
 
     db["recharges"].append({
         "user": uid,
-        "monto": monto
+        "monto": int(msg.text)
     })
 
     save_db()
 
     states[msg.chat.id] = None
-    bot.send_message(msg.chat.id, "⏳ Recarga enviada, espera aprobación")
+    bot.send_message(msg.chat.id, "⏳ Enviado")
 
 @bot.message_handler(func=lambda m: m.text == "📦 Mis compras")
 def compras_user(msg):
     uid = str(msg.chat.id)
 
-    text = "📦 Tus compras:\n\n"
-
-    for c in db["purchases"]:
-        if uid in c:
-            text += c + "\n"
-
-    bot.send_message(msg.chat.id, text if text != "📦 Tus compras:\n\n" else "Sin compras")
+    text = "\n".join([c for c in db["purchases"] if uid in c]) or "Sin compras"
+    bot.send_message(msg.chat.id, text)
 
 # ================= ADMIN LOGIN =================
 
 @bot.message_handler(commands=['admin'])
 def admin(msg):
-    states[msg.chat.id] = "admin_user"
+    states[msg.chat.id] = "login_user"
     bot.send_message(msg.chat.id, "Usuario:")
 
-@bot.message_handler(func=lambda m: states.get(m.chat.id) == "admin_user")
-def admin_user(msg):
+@bot.message_handler(func=lambda m: states.get(m.chat.id) == "login_user")
+def user_admin(msg):
     temp[msg.chat.id] = msg.text
-    states[msg.chat.id] = "admin_pass"
+    states[msg.chat.id] = "login_pass"
     bot.send_message(msg.chat.id, "Contraseña:")
 
-@bot.message_handler(func=lambda m: states.get(m.chat.id) == "admin_pass")
-def admin_pass(msg):
+@bot.message_handler(func=lambda m: states.get(m.chat.id) == "login_pass")
+def pass_admin(msg):
     if temp[msg.chat.id] == ADMIN_USER and msg.text == ADMIN_PASS:
         sessions[msg.chat.id] = True
-        states[msg.chat.id] = None
-        bot.send_message(msg.chat.id, "👑 Admin activo", reply_markup=menu_admin())
+        bot.send_message(msg.chat.id, "👑 Admin", reply_markup=menu_admin())
     else:
-        bot.send_message(msg.chat.id, "❌ Datos incorrectos")
+        bot.send_message(msg.chat.id, "❌ Error")
 
 # ================= ADMIN FUNCIONES =================
 
 @bot.message_handler(func=lambda m: m.text == "📦 Productos" and sessions.get(m.chat.id))
 def productos(msg):
     states[msg.chat.id] = "crear_producto"
-    bot.send_message(msg.chat.id, "Nombre del producto:")
+    bot.send_message(msg.chat.id, "Nombre producto:")
 
 @bot.message_handler(func=lambda m: states.get(m.chat.id) == "crear_producto")
-def save_producto(msg):
+def crear_producto(msg):
     db["products"][msg.text] = []
     db["keys"][msg.text] = []
     save_db()
+    states[msg.chat.id] = "precio_add"
+    temp[msg.chat.id] = msg.text
+    bot.send_message(msg.chat.id, "Precio:")
 
-    states[msg.chat.id] = None
-    bot.send_message(msg.chat.id, "✅ Producto creado", reply_markup=menu_admin())
+@bot.message_handler(func=lambda m: states.get(m.chat.id) == "precio_add")
+def add_price(msg):
+    db["products"][temp[msg.chat.id]].append(msg.text)
+    save_db()
+    states[msg.chat.id] = "key_add"
+    bot.send_message(msg.chat.id, "Agrega keys (una por mensaje, escribe FIN para terminar)")
+
+@bot.message_handler(func=lambda m: states.get(m.chat.id) == "key_add")
+def add_keys(msg):
+    if msg.text == "FIN":
+        states[msg.chat.id] = None
+        return bot.send_message(msg.chat.id, "✅ Producto listo", reply_markup=menu_admin())
+
+    db["keys"][temp[msg.chat.id]].append(msg.text)
+    save_db()
 
 @bot.message_handler(func=lambda m: m.text == "📢 Broadcast" and sessions.get(m.chat.id))
 def broadcast(msg):
@@ -221,47 +205,43 @@ def broadcast(msg):
     bot.send_message(msg.chat.id, "Mensaje:")
 
 @bot.message_handler(func=lambda m: states.get(m.chat.id) == "broadcast")
-def send_all(msg):
+def send(msg):
     for u in db["users"]:
         try:
             bot.send_message(u, msg.text)
         except:
             pass
-
     states[msg.chat.id] = None
     bot.send_message(msg.chat.id, "✅ Enviado")
 
 @bot.message_handler(func=lambda m: m.text == "💰 Recargas" and sessions.get(m.chat.id))
 def recargas(msg):
-    text = "💰 Recargas:\n\n"
-
+    text = ""
     for i, r in enumerate(db["recharges"]):
         text += f"{i} - {r['user']} - ${r['monto']}\n"
-
-    bot.send_message(msg.chat.id, text + "\nEscribe ID para aprobar")
-
+    bot.send_message(msg.chat.id, text + "\nID para aprobar")
     states[msg.chat.id] = "aprobar"
 
 @bot.message_handler(func=lambda m: states.get(m.chat.id) == "aprobar")
 def aprobar(msg):
-    i = int(msg.text)
-
-    r = db["recharges"].pop(i)
-
+    r = db["recharges"].pop(int(msg.text))
     db["users"][r["user"]]["saldo"] += r["monto"]
-
     save_db()
-
-    bot.send_message(msg.chat.id, "✅ Recarga aprobada")
+    bot.send_message(msg.chat.id, "✅ Aprobado")
 
 @bot.message_handler(func=lambda m: m.text == "📜 Compras" and sessions.get(m.chat.id))
-def compras_admin(msg):
-    text = "📜 Compras:\n\n"
+def compras(msg):
+    bot.send_message(msg.chat.id, "\n".join(db["purchases"]))
 
-    for c in db["purchases"]:
-        text += c + "\n"
+@bot.message_handler(func=lambda m: m.text == "👥 Usuarios" and sessions.get(m.chat.id))
+def users(msg):
+    bot.send_message(msg.chat.id, f"👥 Total: {len(db['users'])}")
 
-    bot.send_message(msg.chat.id, text)
+@bot.message_handler(func=lambda m: m.text == "📊 Estadísticas" and sessions.get(m.chat.id))
+def stats(msg):
+    bot.send_message(msg.chat.id,
+        f"📊 Stats\nUsuarios: {len(db['users'])}\nCompras: {len(db['purchases'])}\nProductos: {len(db['products'])}"
+    )
 
 @bot.message_handler(func=lambda m: m.text == "✏️ Bienvenida" and sessions.get(m.chat.id))
 def bienvenida(msg):
@@ -272,18 +252,17 @@ def bienvenida(msg):
 def save_welcome(msg):
     db["welcome"] = msg.text
     save_db()
-
     states[msg.chat.id] = None
-    bot.send_message(msg.chat.id, "✅ Actualizado")
+    bot.send_message(msg.chat.id, "✅ Guardado")
 
 # ================= SALIR =================
 
 @bot.message_handler(func=lambda m: m.text == "🚪 Salir")
 def salir(msg):
     sessions.pop(msg.chat.id, None)
-    bot.send_message(msg.chat.id, "👋 Menú", reply_markup=menu_user())
+    bot.send_message(msg.chat.id, "👋", reply_markup=menu_user())
 
 # ================= RUN =================
 
-print("✅ BOT ONLINE")
+print("🔥 BOT PRO MAX ACTIVO")
 bot.infinity_polling()
