@@ -10,8 +10,8 @@ let users = {};
 let states = {};
 let temp = {};
 let products = {};
-let sessions = {};
 let keys = {};
+let sessions = {};
 
 // ===== MENUS =====
 
@@ -25,6 +25,8 @@ function menuInicio(id) {
 }
 
 function panelAdmin(id) {
+    sessions[id] = { menu: "admin" };
+
     bot.sendMessage(id,
         `🛠 Panel de Administración
 📅 Días activos: 15 días
@@ -39,6 +41,74 @@ Elige una opción:`,
                     ["💰 Recargas", "✏️ Bienvenida"],
                     ["⬅️ Atrás"],
                     ["🔒 Solo yo admin"]
+                ],
+                resize_keyboard: true
+            }
+        }
+    );
+}
+
+function mostrarProductos(id) {
+    sessions[id] = { menu: "productos" };
+
+    let botones = [["➕ Crear producto"]];
+
+    Object.keys(products).forEach(p => {
+        botones.push([p]);
+    });
+
+    botones.push(["⬅️ Volver"]);
+
+    bot.sendMessage(id, "📦 Productos:", {
+        reply_markup: { keyboard: botones, resize_keyboard: true }
+    });
+}
+
+function abrirProducto(id, nombre) {
+    sessions[id] = { menu: "producto", producto: nombre };
+
+    let p = products[nombre];
+
+    let botones = [
+        ["➕ Agregar duración/precio"],
+        ["📋 Funciones/descripcion", "🎬 Link video"],
+        ["📄 Editar mensaje entrega"],
+        ["🚫 Desactivar producto"],
+        ["🗑 Eliminar"]
+    ];
+
+    for (let d in p.variantes) {
+        let precio = p.variantes[d];
+        let total = keys[nombre][d]?.length || 0;
+
+        botones.push([`${d} días $${precio} (${total})`]);
+    }
+
+    botones.push(["⬅️ Volver"]);
+
+    bot.sendMessage(id,
+        `📦 ${nombre}\n\nVariantes: ${Object.keys(p.variantes).length}`,
+        {
+            reply_markup: { keyboard: botones, resize_keyboard: true }
+        }
+    );
+}
+
+function abrirVariante(id, producto, d) {
+    sessions[id] = { menu: "variante", producto, duracion: d };
+
+    let precio = products[producto].variantes[d];
+    let total = keys[producto][d].length;
+
+    bot.sendMessage(id,
+        `🔑 ${d} días\nPrecio: $${precio}\nKeys disponibles: ${total}`,
+        {
+            reply_markup: {
+                keyboard: [
+                    ["➕ Agregar keys"],
+                    ["✏️ Editar precio"],
+                    ["🗑 Eliminar variante"],
+                    ["⬅️ Volver"]
                 ],
                 resize_keyboard: true
             }
@@ -62,6 +132,28 @@ bot.on("message", (msg) => {
     const text = msg.text;
 
     if (!text) return;
+
+    // ===== VOLVER GLOBAL =====
+    if (text === "⬅️ Volver" || text === "⬅️ Atrás") {
+
+        let s = sessions[id];
+
+        if (!s) return panelAdmin(id);
+
+        if (s.menu === "variante") {
+            return abrirProducto(id, s.producto);
+        }
+
+        if (s.menu === "producto") {
+            return mostrarProductos(id);
+        }
+
+        if (s.menu === "productos") {
+            return panelAdmin(id);
+        }
+
+        return panelAdmin(id);
+    }
 
     // ===== LOGIN =====
 
@@ -94,34 +186,21 @@ bot.on("message", (msg) => {
 
     // ===== PANEL =====
 
-    if (text === "📦 Productos") {
-        let botones = [["➕ Crear producto"]];
+    if (text === "📦 Productos") return mostrarProductos(id);
 
-        Object.keys(products).forEach(p => {
-            botones.push([p]);
-        });
-
-        botones.push(["⬅️ Volver"]);
-
-        return bot.sendMessage(id, "📦 Productos:", {
-            reply_markup: { keyboard: botones, resize_keyboard: true }
-        });
-    }
-
-    // ===== CREAR PRODUCTO (FIX BUG) =====
+    // ===== CREAR PRODUCTO =====
 
     if (text === "➕ Crear producto") {
-        states[id] = "esperando_nombre";
-        return bot.sendMessage(id, "📝 Escribe el nombre del producto:");
+        states[id] = "crear_nombre";
+        return bot.sendMessage(id, "📝 Escribe el nombre:");
     }
 
-    if (states[id] === "esperando_nombre") {
+    if (states[id] === "crear_nombre") {
 
-        // 🚫 EVITAR BOTONES
-        if (text.includes("Crear producto") || text.includes("Cancelar")) return;
+        if (text.includes("Crear") || text.includes("Cancelar")) return;
 
         temp[id] = { nombre: text };
-        states[id] = "confirmar_producto";
+        states[id] = "confirmar";
 
         return bot.sendMessage(id,
             `✅ Nombre: ${text}\n\n¿Crear producto?`,
@@ -134,7 +213,7 @@ bot.on("message", (msg) => {
         );
     }
 
-    if (states[id] === "confirmar_producto") {
+    if (states[id] === "confirmar") {
 
         if (text === "❌ Cancelar") {
             states[id] = null;
@@ -153,47 +232,17 @@ bot.on("message", (msg) => {
         }
     }
 
-    // ===== ABRIR PRODUCTO =====
+    // ===== ENTRAR PRODUCTO =====
 
     if (products[text]) {
         return abrirProducto(id, text);
-    }
-
-    function abrirProducto(id, nombre) {
-        let p = products[nombre];
-
-        let botones = [
-            ["➕ Agregar duración/precio"],
-            ["📋 Funciones/descripcion", "🎬 Link video"],
-            ["📄 Editar mensaje entrega"],
-            ["🚫 Desactivar producto"],
-            ["🗑 Eliminar"]
-        ];
-
-        for (let d in p.variantes) {
-            let precio = p.variantes[d];
-            let total = keys[nombre][d]?.length || 0;
-
-            botones.push([`${d} días $${precio} (${total})`]);
-        }
-
-        botones.push(["⬅️ Volver"]);
-
-        bot.sendMessage(id,
-            `📦 ${nombre}\n\nVariantes: ${Object.keys(p.variantes).length}`,
-            {
-                reply_markup: { keyboard: botones, resize_keyboard: true }
-            }
-        );
-
-        sessions[id] = { producto: nombre };
     }
 
     // ===== AGREGAR DURACIÓN =====
 
     if (text === "➕ Agregar duración/precio") {
         states[id] = "duracion";
-        return bot.sendMessage(id, "📅 Selecciona duración:", {
+        return bot.sendMessage(id, "📅 Duración:", {
             reply_markup: {
                 keyboard: [
                     ["1", "7", "15", "30"],
@@ -206,9 +255,10 @@ bot.on("message", (msg) => {
     }
 
     if (states[id] === "duracion") {
+
         if (text === "✏️ Otra duración") {
             states[id] = "otra";
-            return bot.sendMessage(id, "Escribe los días:");
+            return bot.sendMessage(id, "Escribe días:");
         }
 
         temp[id] = { duracion: text };
@@ -243,29 +293,14 @@ bot.on("message", (msg) => {
         let d = match[1];
         let producto = sessions[id].producto;
 
-        sessions[id].duracion = d;
-
-        return bot.sendMessage(id,
-            `🔑 ${d} días\nPrecio: $${products[producto].variantes[d]}\nKeys: ${keys[producto][d].length}`,
-            {
-                reply_markup: {
-                    keyboard: [
-                        ["➕ Agregar keys"],
-                        ["✏️ Editar precio"],
-                        ["🗑 Eliminar variante"],
-                        ["⬅️ Volver"]
-                    ],
-                    resize_keyboard: true
-                }
-            }
-        );
+        return abrirVariante(id, producto, d);
     }
 
     // ===== KEYS =====
 
     if (text === "➕ Agregar keys") {
         states[id] = "keys";
-        return bot.sendMessage(id, "📩 Envía las keys:");
+        return bot.sendMessage(id, "📩 Envía keys (una por línea):");
     }
 
     if (states[id] === "keys") {
@@ -290,6 +325,7 @@ bot.on("message", (msg) => {
         let { producto, duracion } = sessions[id];
 
         products[producto].variantes[duracion] = text;
+
         states[id] = null;
 
         return bot.sendMessage(id, "✅ Precio actualizado");
