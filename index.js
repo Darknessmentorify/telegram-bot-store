@@ -1,40 +1,23 @@
 const TelegramBot = require('node-telegram-bot-api');
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-// ================= BASE =================
+// ===== BASE =====
 let users = {};
 let pendingUsers = {};
 let products = {};
 let sessions = {};
 let states = {};
-let keys = {};
+let keys = {}; // 🔥 ahora por producto y duración
 
 const ADMIN_USER = "Guillermo65";
 const ADMIN_PASS = "Guillermito00";
 
-// ================= MENUS =================
+// ===== MENUS =====
 
-function menuPrincipal(chatId) {
-    bot.sendMessage(chatId, "🏠 Menú", {
-        reply_markup: {
-            keyboard: [
-                ["🛒 Productos"],
-                ["💰 Mi cuenta", "📜 Historial"],
-                ["🎁 Código Promo"],
-                ["🔐 Login", "🚪 Cerrar sesión"]
-            ],
-            resize_keyboard: true
-        }
-    });
-}
-
-function menuLogin(chatId) {
+function menuInicio(chatId) {
     bot.sendMessage(chatId, "🔐 Opciones:", {
         reply_markup: {
-            keyboard: [
-                ["🔐 Login"],
-                ["📝 Registrarse"]
-            ],
+            keyboard: [["🔐 Login"], ["📝 Registrarse"]],
             resize_keyboard: true
         }
     });
@@ -46,7 +29,6 @@ function menuAdmin(chatId) {
             keyboard: [
                 ["➕ Crear producto"],
                 ["📦 Productos"],
-                ["💰 Agregar saldo"],
                 ["👥 Usuarios"],
                 ["🚪 Cerrar sesión"]
             ],
@@ -55,23 +37,17 @@ function menuAdmin(chatId) {
     });
 }
 
-// ================= START =================
+// ===== START =====
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
 
-    if (!users[chatId]) {
-        menuLogin(chatId); // 🔥 AQUÍ ESTÁ EL ARREGLO
-    } else {
-        if (users[chatId].isAdmin) {
-            menuAdmin(chatId);
-        } else {
-            menuPrincipal(chatId);
-        }
-    }
+    if (!users[chatId]) return menuInicio(chatId);
+
+    if (users[chatId].isAdmin) return menuAdmin(chatId);
 });
 
-// ================= MENSAJES =================
+// ===== MENSAJES =====
 
 bot.on("message", (msg) => {
     const chatId = msg.chat.id;
@@ -79,47 +55,7 @@ bot.on("message", (msg) => {
 
     if (!text) return;
 
-    // ================= REGISTRO =================
-
-    if (text === "📝 Registrarse") {
-        states[chatId] = "reg_user";
-        return bot.sendMessage(chatId, "👤 Usuario:");
-    }
-
-    if (states[chatId] === "reg_user") {
-        pendingUsers[chatId] = { username: text };
-        states[chatId] = "reg_pass";
-        return bot.sendMessage(chatId, "🔑 Contraseña:");
-    }
-
-    if (states[chatId] === "reg_pass") {
-        pendingUsers[chatId].password = text;
-        pendingUsers[chatId].saldo = 0;
-
-        bot.sendMessage(chatId, "⏳ Esperando aprobación...");
-
-        // Notificar admin
-        for (let id in users) {
-            if (users[id].isAdmin) {
-                bot.sendMessage(id,
-                    `📥 Nuevo usuario: ${pendingUsers[chatId].username}`,
-                    {
-                        reply_markup: {
-                            inline_keyboard: [[
-                                { text: "✅ Aprobar", callback_data: "ap_" + chatId },
-                                { text: "❌ Rechazar", callback_data: "re_" + chatId }
-                            ]]
-                        }
-                    }
-                );
-            }
-        }
-
-        states[chatId] = null;
-        return;
-    }
-
-    // ================= LOGIN =================
+    // ===== LOGIN =====
 
     if (text === "🔐 Login") {
         states[chatId] = "login_user";
@@ -133,45 +69,28 @@ bot.on("message", (msg) => {
     }
 
     if (states[chatId] === "login_pass") {
-        let u = sessions[chatId].user;
+        let u = sessions[chatId].user.trim();
+        let p = text.trim();
 
-        // ADMIN
-        if (u === ADMIN_USER && text === ADMIN_PASS) {
-            users[chatId] = { username: u, isAdmin: true, saldo: 0 };
-            bot.sendMessage(chatId, "👑 Admin logueado");
-            menuAdmin(chatId);
-        } else {
-            let encontrado = false;
-
-            for (let id in users) {
-                if (users[id].username === u && users[id].password === text) {
-                    users[chatId] = users[id];
-                    encontrado = true;
-                }
-            }
-
-            if (encontrado) {
-                bot.sendMessage(chatId, "✅ Login correcto");
-                menuPrincipal(chatId);
-            } else {
-                bot.sendMessage(chatId, "❌ Datos incorrectos");
-                menuLogin(chatId);
-            }
+        if (u === ADMIN_USER && p === ADMIN_PASS) {
+            users[chatId] = { username: u, isAdmin: true };
+            bot.sendMessage(chatId, "👑 Admin activo");
+            return menuAdmin(chatId);
         }
 
-        states[chatId] = null;
-        return;
+        bot.sendMessage(chatId, "❌ Incorrecto");
+        return menuInicio(chatId);
     }
 
-    // ================= LOGOUT =================
+    // ===== LOGOUT =====
 
     if (text === "🚪 Cerrar sesión") {
         delete users[chatId];
-        bot.sendMessage(chatId, "🚪 Sesión cerrada");
-        return menuLogin(chatId); // 🔥 IMPORTANTE
+        bot.sendMessage(chatId, "Sesión cerrada");
+        return menuInicio(chatId);
     }
 
-    // ================= CREAR PRODUCTO =================
+    // ===== CREAR PRODUCTO =====
 
     if (text === "➕ Crear producto") {
         states[chatId] = "crear_producto";
@@ -179,18 +98,19 @@ bot.on("message", (msg) => {
     }
 
     if (states[chatId] === "crear_producto") {
-        products[text] = { duraciones: {}, activo: true };
-        keys[text] = [];
+        products[text] = { duraciones: {} };
+        keys[text] = {}; // 🔥 importante
 
         sessions[chatId] = { producto: text };
-
         states[chatId] = "duracion";
 
-        return bot.sendMessage(chatId, "📅 Elige duración:", {
+        return bot.sendMessage(chatId, "📅 Duración:", {
             reply_markup: {
                 keyboard: [
-                    ["1 día", "7 días"],
-                    ["15 días", "30 días"],
+                    ["1 día"],
+                    ["7 días"],
+                    ["15 días"],
+                    ["30 días"],
                     ["✏️ Otra duración"]
                 ],
                 resize_keyboard: true
@@ -198,38 +118,43 @@ bot.on("message", (msg) => {
         });
     }
 
+    // ===== DURACIÓN =====
+
     if (states[chatId] === "duracion") {
         if (text === "✏️ Otra duración") {
             states[chatId] = "otra_duracion";
-            return bot.sendMessage(chatId, "✏️ Escribe días:");
+            return bot.sendMessage(chatId, "Escribe días:");
         }
 
         let dias = text.replace(" días", "").replace(" día", "");
         sessions[chatId].duracion = dias;
         states[chatId] = "precio";
 
-        return bot.sendMessage(chatId, `💰 Precio para ${dias} días:`);
+        return bot.sendMessage(chatId, `💰 Precio para ${dias}:`);
     }
 
     if (states[chatId] === "otra_duracion") {
         sessions[chatId].duracion = text;
         states[chatId] = "precio";
-        return bot.sendMessage(chatId, `💰 Precio para ${text} días:`);
+        return bot.sendMessage(chatId, `💰 Precio para ${text}:`);
     }
 
     if (states[chatId] === "precio") {
         let p = sessions[chatId].producto;
         let d = sessions[chatId].duracion;
 
-        products[p].duraciones[d] = { precio: text, ventas: 0 };
+        products[p].duraciones[d] = { precio: text };
 
-        bot.sendMessage(chatId, "✅ Precio agregado");
+        // 🔥 inicializar keys para esa duración
+        if (!keys[p][d]) keys[p][d] = [];
+
+        bot.sendMessage(chatId, "✅ Agregado");
 
         states[chatId] = "duracion";
-        return bot.sendMessage(chatId, "➕ Agrega otra duración o /start");
+        return bot.sendMessage(chatId, "Agrega otra duración o /start");
     }
 
-    // ================= PRODUCTOS ADMIN =================
+    // ===== VER PRODUCTOS =====
 
     if (text === "📦 Productos") {
         let botones = [];
@@ -243,78 +168,71 @@ bot.on("message", (msg) => {
         });
     }
 
+    // ===== ABRIR PRODUCTO =====
+
     if (products[text]) {
-        let p = products[text];
+        sessions[chatId] = { producto: text };
+
         let botones = [];
 
-        botones.push(["➕ Agregar duración/precio"]);
-        botones.push(["🔑 Agregar keys"]);
-        botones.push(["🚫 Desactivar producto"]);
-        botones.push(["🗑 Eliminar"]);
-
-        for (let d in p.duraciones) {
-            botones.push([`${d} días - $${p.duraciones[d].precio}`]);
+        for (let d in products[text].duraciones) {
+            botones.push([`${text}|${d}`]);
         }
 
         botones.push(["⬅️ Atrás"]);
 
-        sessions[chatId] = { producto: text };
+        return bot.sendMessage(chatId, `📦 ${text}`, {
+            reply_markup: { keyboard: botones, resize_keyboard: true }
+        });
+    }
+
+    // ===== SELECCIONAR VARIANTE =====
+
+    if (text.includes("|")) {
+        let [p, d] = text.split("|");
+
+        sessions[chatId] = { producto: p, duracion: d };
+
+        let totalKeys = keys[p][d] ? keys[p][d].length : 0;
 
         return bot.sendMessage(chatId,
-            `📦 ${text}\n\nVariantes: ${Object.keys(p.duraciones).length}`,
+            `📦 ${p}\n⏳ ${d} días\n🔑 Keys: ${totalKeys}`,
             {
-                reply_markup: { keyboard: botones, resize_keyboard: true }
+                reply_markup: {
+                    keyboard: [
+                        ["🔑 Agregar keys"],
+                        ["⬅️ Atrás"]
+                    ],
+                    resize_keyboard: true
+                }
             }
         );
     }
 
-    // ================= KEYS =================
+    // ===== AGREGAR KEYS POR DURACIÓN =====
 
     if (text === "🔑 Agregar keys") {
         states[chatId] = "add_keys";
-        return bot.sendMessage(chatId, "🔑 Envía keys (una por línea):");
+        return bot.sendMessage(chatId, "Envía keys (una por línea):");
     }
 
     if (states[chatId] === "add_keys") {
-        let p = sessions[chatId].producto;
+        let { producto, duracion } = sessions[chatId];
+
         let nuevas = text.split("\n");
 
-        keys[p].push(...nuevas);
+        keys[producto][duracion].push(...nuevas);
 
         states[chatId] = null;
-        return bot.sendMessage(chatId, `✅ ${nuevas.length} keys agregadas`);
+
+        return bot.sendMessage(chatId,
+            `✅ ${nuevas.length} keys agregadas a ${duracion} días`
+        );
     }
 
-    // ================= USUARIOS =================
+    // ===== ATRÁS =====
 
-    if (text === "👥 Usuarios") {
-        let botones = [];
-
-        for (let id in users) {
-            botones.push([users[id].username]);
-        }
-
-        return bot.sendMessage(chatId, "👥 Usuarios:", {
-            reply_markup: { keyboard: botones, resize_keyboard: true }
-        });
-    }
-});
-
-// ================= CALLBACK =================
-
-bot.on("callback_query", (q) => {
-    let data = q.data;
-
-    if (data.startsWith("ap_")) {
-        let id = data.split("_")[1];
-        users[id] = pendingUsers[id];
-        delete pendingUsers[id];
-        bot.sendMessage(id, "✅ Aprobado");
-    }
-
-    if (data.startsWith("re_")) {
-        let id = data.split("_")[1];
-        delete pendingUsers[id];
-        bot.sendMessage(id, "❌ Rechazado");
+    if (text === "⬅️ Atrás") {
+        return menuAdmin(chatId);
     }
 });
