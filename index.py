@@ -3,7 +3,7 @@ from telebot.types import ReplyKeyboardMarkup
 import json
 import os
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("8601185129:AAFqKKcB2BPUc_gGvbtbs7QGc6v-kDQLAuw")
 bot = telebot.TeleBot(TOKEN)
 
 DB_FILE = "database.json"
