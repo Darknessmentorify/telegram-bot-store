@@ -1,11 +1,9 @@
 const TelegramBot = require("node-telegram-bot-api");
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-// BASE DE DATOS
 let users = {};
-let products = {}; // ahora vacío
+let products = {};
 
-// ADMIN
 const ADMIN_USER = "Guillermo65";
 const ADMIN_PASS = "Guillermito00.";
 
@@ -13,23 +11,105 @@ const ADMIN_PASS = "Guillermito00.";
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "🏠 Menú", {
     reply_markup: {
-      keyboard: [
-        ["🛒 Productos"],
-        ["💰 Mi Cuenta"],
-        ["📜 Historial"],
-        ["🔐 Login"]
-      ],
-      resize_keyboard: true
+      inline_keyboard: [
+        [{ text: "🛒 Productos", callback_data: "productos" }],
+        [{ text: "🔐 Login Admin", callback_data: "login" }]
+      ]
     }
   });
 });
 
-// LOGIN
-bot.onText(/🔐 Login/, (msg) => {
-  users[msg.chat.id] = { step: "login_user" };
-  bot.sendMessage(msg.chat.id, "Usuario:");
+// BOTONES
+bot.on("callback_query", (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (!users[chatId]) users[chatId] = {};
+  let state = users[chatId];
+
+  // LOGIN
+  if (data === "login") {
+    state.step = "login_user";
+    bot.sendMessage(chatId, "Usuario:");
+  }
+
+  // PRODUCTOS
+  if (data === "productos") {
+    let botones = Object.keys(products).map(p => [
+      { text: p, callback_data: "ver_" + p }
+    ]);
+
+    bot.sendMessage(chatId, "Elige producto:", {
+      reply_markup: {
+        inline_keyboard: [
+          ...botones,
+          [{ text: "⬅️ Atrás", callback_data: "menu" }]
+        ]
+      }
+    });
+  }
+
+  // VER PRODUCTO
+  if (data.startsWith("ver_")) {
+    let nombre = data.replace("ver_", "");
+
+    let botones = products[nombre].map((p, i) => [
+      {
+        text: `${p.dias} días - $${p.precio}`,
+        callback_data: "nada"
+      }
+    ]);
+
+    bot.sendMessage(chatId, `📦 ${nombre}`, {
+      reply_markup: {
+        inline_keyboard: [
+          ...botones,
+          [{ text: "⬅️ Atrás", callback_data: "productos" }]
+        ]
+      }
+    });
+  }
+
+  // MENU
+  if (data === "menu") {
+    bot.sendMessage(chatId, "🏠 Menú", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🛒 Productos", callback_data: "productos" }],
+          [{ text: "🔐 Login Admin", callback_data: "login" }]
+        ]
+      }
+    });
+  }
+
+  // PANEL ADMIN
+  if (data === "panel") {
+    bot.sendMessage(chatId, "⚙️ Panel Admin", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "➕ Crear producto", callback_data: "crear" }],
+          [{ text: "⬅️ Menú", callback_data: "menu" }]
+        ]
+      }
+    });
+  }
+
+  // CREAR PRODUCTO
+  if (data === "crear") {
+    state.step = "crear_nombre";
+    bot.sendMessage(chatId, "Nombre del producto:");
+  }
+
+  // DURACIONES
+  if (data.startsWith("dias_")) {
+    let dias = data.replace("dias_", "");
+    state.dias = dias;
+    state.step = "precio";
+    bot.sendMessage(chatId, `Precio para ${dias} días:`);
+  }
 });
 
+// MENSAJES
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
   if (!users[chatId]) users[chatId] = {};
@@ -50,98 +130,52 @@ bot.on("message", (msg) => {
       msg.text === ADMIN_PASS
     ) {
       state.admin = true;
+      state.step = null;
+
       bot.sendMessage(chatId, "✅ Admin activo", {
         reply_markup: {
-          keyboard: [
-            ["➕ Crear producto"],
-            ["📊 Estadísticas"],
-            ["🏠 Menú"]
-          ],
-          resize_keyboard: true
+          inline_keyboard: [
+            [{ text: "➕ Crear producto", callback_data: "crear" }]
+          ]
         }
       });
     } else {
       bot.sendMessage(chatId, "❌ Incorrecto");
     }
-    state.step = null;
     return;
   }
 
-  // CREAR PRODUCTO
-  if (msg.text === "➕ Crear producto" && state.admin) {
-    state.step = "crear_nombre";
-    bot.sendMessage(chatId, "Nombre del producto:");
-    return;
-  }
-
+  // CREAR NOMBRE
   if (state.step === "crear_nombre") {
-    state.newProduct = msg.text;
-    products[state.newProduct] = [];
-    state.step = "crear_dias";
-    bot.sendMessage(chatId, "Duración en días:");
+    state.producto = msg.text;
+    products[state.producto] = [];
+
+    state.step = "elegir_dias";
+
+    bot.sendMessage(chatId, "Selecciona duración:", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "1 día", callback_data: "dias_1" }],
+          [{ text: "7 días", callback_data: "dias_7" }],
+          [{ text: "15 días", callback_data: "dias_15" }],
+          [{ text: "30 días", callback_data: "dias_30" }]
+        ]
+      }
+    });
     return;
   }
 
-  if (state.step === "crear_dias") {
-    state.dias = msg.text;
-    state.step = "crear_precio";
-    bot.sendMessage(chatId, "Precio:");
-    return;
-  }
-
-  if (state.step === "crear_precio") {
-    products[state.newProduct].push({
+  // PRECIO
+  if (state.step === "precio") {
+    products[state.producto].push({
       dias: state.dias,
       precio: msg.text
     });
 
-    bot.sendMessage(chatId, "✅ Producto agregado");
+    bot.sendMessage(chatId, "✅ Precio agregado");
 
     state.step = null;
     return;
-  }
-
-  // VER PRODUCTOS
-  if (msg.text === "🛒 Productos") {
-    let lista = Object.keys(products);
-
-    if (lista.length === 0) {
-      bot.sendMessage(chatId, "No hay productos aún");
-      return;
-    }
-
-    let botones = lista.map(p => [p]);
-
-    bot.sendMessage(chatId, "Elige producto:", {
-      reply_markup: {
-        keyboard: [...botones, ["🏠 Menú"]],
-        resize_keyboard: true
-      }
-    });
-  }
-
-  // MOSTRAR PRODUCTO
-  if (products[msg.text]) {
-    let opciones = products[msg.text]
-      .map(p => `${p.dias} días - $${p.precio}`)
-      .join("\n");
-
-    bot.sendMessage(chatId, `📦 ${msg.text}\n\n${opciones}`);
-  }
-
-  // MENÚ
-  if (msg.text === "🏠 Menú") {
-    bot.sendMessage(chatId, "🏠 Menú", {
-      reply_markup: {
-        keyboard: [
-          ["🛒 Productos"],
-          ["💰 Mi Cuenta"],
-          ["📜 Historial"],
-          ["🔐 Login"]
-        ],
-        resize_keyboard: true
-      }
-    });
   }
 });
 
