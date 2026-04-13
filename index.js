@@ -1,246 +1,249 @@
 const TelegramBot = require("node-telegram-bot-api");
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-let users = {};
-let products = {};
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
 // ADMIN
 const ADMIN_USER = "Guillermo65";
 const ADMIN_PASS = "Guillermito00.";
 
-// ===== MENÚ =====
+// BASE DATOS
+let users = {};
+let sesiones = {};
+let solicitudes = {};
+let productos = {};
+let state = {};
+
+// MENU PRINCIPAL
 function menu(chatId) {
   bot.sendMessage(chatId, "🏠 Menú", {
     reply_markup: {
-      inline_keyboard: [
-        [{ text: "🛒 Productos", callback_data: "productos" }],
-        [{ text: "💰 Mi cuenta", callback_data: "cuenta" }],
-        [{ text: "📝 Registrarse", callback_data: "register" }],
-        [{ text: "🔐 Login", callback_data: "login" }]
-      ]
+      keyboard: [
+        ["🛒 Productos"],
+        ["💰 Mi cuenta"],
+        ["📜 Historial"],
+        ["🎁 Código Promo"],
+        ["🔐 Login"],
+        ["📝 Registrarse"]
+      ],
+      resize_keyboard: true
     }
   });
 }
 
-// START
+// PANEL ADMIN
+function adminMenu(chatId) {
+  bot.sendMessage(chatId, "⚙️ Admin", {
+    reply_markup: {
+      keyboard: [
+        ["➕ Crear producto"],
+        ["💰 Agregar saldo"],
+        ["👥 Usuarios"],
+        ["📥 Solicitudes"],
+        ["🔓 Cerrar sesión"],
+        ["🏠 Menú"]
+      ],
+      resize_keyboard: true
+    }
+  });
+}
+
+// INICIO
 bot.onText(/\/start/, (msg) => {
   menu(msg.chat.id);
 });
 
-// ===== BOTONES =====
+// MENSAJES
+bot.on("message", (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text;
+
+  if (!state[chatId]) state[chatId] = {};
+
+  let s = state[chatId];
+
+  // LOGIN
+  if (text === "🔐 Login") {
+    s.step = "login_user";
+    return bot.sendMessage(chatId, "👤 Usuario:");
+  }
+
+  if (s.step === "login_user") {
+    s.user = text;
+    s.step = "login_pass";
+    return bot.sendMessage(chatId, "🔑 Contraseña:");
+  }
+
+  if (s.step === "login_pass") {
+    s.step = null;
+
+    // ADMIN
+    if (s.user === ADMIN_USER && text === ADMIN_PASS) {
+      sesiones[chatId] = "admin";
+      return adminMenu(chatId);
+    }
+
+    // USUARIO
+    let u = Object.values(users).find(x => x.username === s.user && x.password === text);
+
+    if (u) {
+      sesiones[chatId] = u.username;
+      return menu(chatId);
+    }
+
+    return bot.sendMessage(chatId, "❌ Datos incorrectos");
+  }
+
+  // REGISTRO
+  if (text === "📝 Registrarse") {
+    s.step = "reg_user";
+    return bot.sendMessage(chatId, "👤 Usuario:");
+  }
+
+  if (s.step === "reg_user") {
+    s.newUser = text;
+    s.step = "reg_pass";
+    return bot.sendMessage(chatId, "🔑 Contraseña:");
+  }
+
+  if (s.step === "reg_pass") {
+    solicitudes[chatId] = {
+      username: s.newUser,
+      password: text
+    };
+
+    s.step = null;
+
+    return bot.sendMessage(chatId, "⏳ Solicitud enviada");
+  }
+
+  // CERRAR SESIÓN
+  if (text === "🔓 Cerrar sesión") {
+    delete sesiones[chatId];
+    return menu(chatId);
+  }
+
+  // ADMIN SOLO
+  if (sesiones[chatId] === "admin") {
+
+    // CREAR PRODUCTO
+    if (text === "➕ Crear producto") {
+      s.step = "crear_producto";
+      return bot.sendMessage(chatId, "📦 Nombre del producto:");
+    }
+
+    if (s.step === "crear_producto") {
+      productos[text] = [];
+      s.prod = text;
+      s.step = "precio";
+      return bot.sendMessage(chatId, "💰 Precio (ej: 10):");
+    }
+
+    if (s.step === "precio") {
+      productos[s.prod].push(text);
+      s.step = null;
+      return bot.sendMessage(chatId, "✅ Producto creado");
+    }
+
+    // VER USUARIOS
+    if (text === "👥 Usuarios") {
+      let lista = Object.values(users).map(u => u.username).join("\n") || "sin usuarios";
+      return bot.sendMessage(chatId, "👥 Usuarios:\n" + lista);
+    }
+
+    // AGREGAR SALDO
+    if (text === "💰 Agregar saldo") {
+      s.step = "saldo_user";
+      return bot.sendMessage(chatId, "👤 Usuario:");
+    }
+
+    if (s.step === "saldo_user") {
+      s.target = text;
+      s.step = "saldo_cant";
+      return bot.sendMessage(chatId, "💰 Cantidad:");
+    }
+
+    if (s.step === "saldo_cant") {
+      let u = Object.values(users).find(x => x.username === s.target);
+
+      if (!u) return bot.sendMessage(chatId, "❌ Usuario no encontrado");
+
+      u.saldo += parseFloat(text);
+      s.step = null;
+
+      return bot.sendMessage(chatId, "✅ Saldo agregado");
+    }
+
+    // SOLICITUDES
+    if (text === "📥 Solicitudes") {
+      let lista = Object.entries(solicitudes);
+
+      if (lista.length === 0)
+        return bot.sendMessage(chatId, "❌ No hay solicitudes");
+
+      lista.forEach(([id, u]) => {
+        bot.sendMessage(chatId, `👤 ${u.username}`, {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "✅ Aceptar", callback_data: "ok_" + id },
+                { text: "❌ Rechazar", callback_data: "no_" + id }
+              ]
+            ]
+          }
+        });
+      });
+    }
+  }
+
+  // USUARIO NORMAL
+
+  if (text === "💰 Mi cuenta") {
+    let u = users[chatId];
+    if (!u) return bot.sendMessage(chatId, "❌ No registrado");
+
+    return bot.sendMessage(chatId,
+      `💰 Saldo: $${u.saldo}\n👤 ${u.username}`);
+  }
+
+  if (text === "🛒 Productos") {
+    let keys = Object.keys(productos);
+
+    if (keys.length === 0)
+      return bot.sendMessage(chatId, "❌ No hay productos");
+
+    return bot.sendMessage(chatId, "🛒 Productos:\n" + keys.join("\n"));
+  }
+});
+
+// CALLBACKS
 bot.on("callback_query", (q) => {
   const chatId = q.message.chat.id;
   const data = q.data;
 
-  if (!users[chatId]) users[chatId] = {};
-  let state = users[chatId];
+  // ACEPTAR
+  if (data.startsWith("ok_")) {
+    let id = data.replace("ok_", "");
+    let u = solicitudes[id];
 
-  // MENÚ
-  if (data === "menu") return menu(chatId);
+    users[id] = {
+      username: u.username,
+      password: u.password,
+      saldo: 0
+    };
 
-  // REGISTRO
-  if (data === "register") {
-    state.step = "reg_user";
-    return bot.sendMessage(chatId, "📝 Crea tu usuario:");
+    delete solicitudes[id];
+
+    bot.sendMessage(id, "✅ Aprobado");
+    bot.sendMessage(chatId, "✔️ Listo");
   }
 
-  // LOGIN
-  if (data === "login") {
-    state.step = "login_user";
-    return bot.sendMessage(chatId, "👤 Usuario:");
-  }
+  // RECHAZAR
+  if (data.startsWith("no_")) {
+    let id = data.replace("no_", "");
+    delete solicitudes[id];
 
-  // PRODUCTOS
-  if (data === "productos") {
-    let lista = Object.keys(products);
-
-    if (lista.length === 0)
-      return bot.sendMessage(chatId, "❌ No hay productos");
-
-    let botones = lista.map(p => [
-      { text: p, callback_data: "ver_" + p }
-    ]);
-
-    return bot.sendMessage(chatId, "🛒 Productos:", {
-      reply_markup: {
-        inline_keyboard: botones
-      }
-    });
-  }
-
-  // VER PRODUCTO
-  if (data.startsWith("ver_")) {
-    let nombre = data.replace("ver_", "");
-
-    let botones = products[nombre].map(p => [
-      { text: `${p.dias} días - $${p.precio}`, callback_data: "buy" }
-    ]);
-
-    return bot.sendMessage(chatId, `📦 ${nombre}`, {
-      reply_markup: {
-        inline_keyboard: botones
-      }
-    });
-  }
-
-  // CUENTA
-  if (data === "cuenta") {
-    if (!state.username)
-      return bot.sendMessage(chatId, "❌ Debes registrarte");
-
-    return bot.sendMessage(chatId,
-      `👤 Usuario: ${state.username}\n💰 Saldo: $${state.saldo || 0}`);
-  }
-
-  // PANEL ADMIN
-  if (data === "panel") {
-    if (!state.admin) return;
-
-    return bot.sendMessage(chatId, "⚙️ Admin", {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "➕ Crear producto", callback_data: "crear" }],
-          [{ text: "💰 Agregar saldo", callback_data: "addsaldo" }],
-          [{ text: "👥 Usuarios", callback_data: "usuarios" }]
-        ]
-      }
-    });
-  }
-
-  // CREAR PRODUCTO
-  if (data === "crear") {
-    state.step = "crear_nombre";
-    return bot.sendMessage(chatId, "Nombre del producto:");
-  }
-
-  // DURACIONES
-  if (data.startsWith("dias_")) {
-    state.dias = data.replace("dias_", "");
-    state.step = "precio";
-    return bot.sendMessage(chatId, "Precio:");
-  }
-
-  // VER USUARIOS
-  if (data === "usuarios" && state.admin) {
-    let lista = Object.values(users)
-      .map(u => u.username || "sin usuario")
-      .join("\n");
-
-    return bot.sendMessage(chatId, "👥 Usuarios:\n" + lista);
-  }
-
-  // AGREGAR SALDO
-  if (data === "addsaldo" && state.admin) {
-    state.step = "saldo_user";
-    return bot.sendMessage(chatId, "Usuario:");
-  }
-});
-
-// ===== MENSAJES =====
-bot.on("message", (msg) => {
-  const chatId = msg.chat.id;
-  if (!users[chatId]) users[chatId] = {};
-  let state = users[chatId];
-
-  // REGISTRO
-  if (state.step === "reg_user") {
-    state.newUser = msg.text;
-    state.step = "reg_pass";
-    return bot.sendMessage(chatId, "Contraseña:");
-  }
-
-  if (state.step === "reg_pass") {
-    state.username = state.newUser;
-    state.password = msg.text;
-    state.saldo = 0;
-    state.step = null;
-
-    return bot.sendMessage(chatId, "✅ Registrado");
-  }
-
-  // LOGIN
-  if (state.step === "login_user") {
-    state.loginUser = msg.text;
-    state.step = "login_pass";
-    return bot.sendMessage(chatId, "Contraseña:");
-  }
-
-  if (state.step === "login_pass") {
-    if (
-      state.loginUser === ADMIN_USER &&
-      msg.text === ADMIN_PASS
-    ) {
-      state.admin = true;
-      state.step = null;
-
-      return bot.sendMessage(chatId, "👑 Admin activo", {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "⚙️ Panel", callback_data: "panel" }]
-          ]
-        }
-      });
-    }
-
-    if (
-      state.username === state.loginUser &&
-      state.password === msg.text
-    ) {
-      state.step = null;
-      return bot.sendMessage(chatId, "✅ Login correcto");
-    }
-
-    return bot.sendMessage(chatId, "❌ Incorrecto");
-  }
-
-  // CREAR PRODUCTO
-  if (state.step === "crear_nombre") {
-    state.producto = msg.text;
-    products[state.producto] = [];
-    state.step = "elegir_dias";
-
-    return bot.sendMessage(chatId, "Duración:", {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "1 día", callback_data: "dias_1" }],
-          [{ text: "7 días", callback_data: "dias_7" }],
-          [{ text: "30 días", callback_data: "dias_30" }]
-        ]
-      }
-    });
-  }
-
-  // PRECIO
-  if (state.step === "precio") {
-    products[state.producto].push({
-      dias: state.dias,
-      precio: msg.text
-    });
-
-    state.step = null;
-
-    return bot.sendMessage(chatId, "✅ Guardado");
-  }
-
-  // AGREGAR SALDO
-  if (state.step === "saldo_user") {
-    state.targetUser = msg.text;
-    state.step = "saldo_cantidad";
-    return bot.sendMessage(chatId, "Cantidad:");
-  }
-
-  if (state.step === "saldo_cantidad") {
-    let user = Object.values(users)
-      .find(u => u.username === state.targetUser);
-
-    if (user) {
-      user.saldo = (user.saldo || 0) + Number(msg.text);
-      bot.sendMessage(chatId, "✅ Saldo agregado");
-    } else {
-      bot.sendMessage(chatId, "❌ Usuario no encontrado");
-    }
-
-    state.step = null;
+    bot.sendMessage(id, "❌ Rechazado");
+    bot.sendMessage(chatId, "❌ Eliminado");
   }
 });
 
