@@ -1,13 +1,16 @@
 const TelegramBot = require("node-telegram-bot-api");
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
+// ADMIN
 const ADMIN_USER = "Guillermo65";
 const ADMIN_PASS = "Guillermito00.";
 
+// BASE
 let users = {};
 let sesiones = {};
 let solicitudes = {};
 let productos = {};
+let historial = {};
 let state = {};
 
 // MENU
@@ -46,6 +49,7 @@ function adminMenu(chatId) {
 
 bot.onText(/\/start/, (msg) => menu(msg.chat.id));
 
+// ================= MENSAJES =================
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
@@ -109,7 +113,7 @@ bot.on("message", (msg) => {
     return menu(chatId);
   }
 
-  // ADMIN
+  // ================= ADMIN =================
   if (sesiones[chatId] === "admin") {
 
     // CREAR PRODUCTO
@@ -121,7 +125,7 @@ bot.on("message", (msg) => {
     if (s.step === "prod_name") {
       productos[text] = {};
       s.prod = text;
-      s.step = "duracion_menu";
+      s.step = null;
 
       return bot.sendMessage(chatId, "⏱ Selecciona duración:", {
         reply_markup: {
@@ -154,6 +158,7 @@ bot.on("message", (msg) => {
 
       u.saldo += parseFloat(text);
       s.step = null;
+
       return bot.sendMessage(chatId, "✅ Saldo agregado");
     }
 
@@ -167,32 +172,65 @@ bot.on("message", (msg) => {
         reply_markup: { inline_keyboard: botones }
       });
     }
+
+    // SOLICITUDES
+    if (text === "📥 Solicitudes") {
+      let lista = Object.entries(solicitudes);
+
+      if (lista.length === 0)
+        return bot.sendMessage(chatId, "❌ No hay solicitudes");
+
+      lista.forEach(([id, u]) => {
+        bot.sendMessage(chatId, `👤 ${u.username}`, {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "✅ Aceptar", callback_data: "ok_" + id },
+                { text: "❌ Rechazar", callback_data: "no_" + id }
+              ]
+            ]
+          }
+        });
+      });
+    }
   }
 
-  // USUARIO NORMAL
+  // ================= USUARIO =================
+
   if (text === "💰 Mi cuenta") {
     let u = users[chatId];
     if (!u) return bot.sendMessage(chatId, "❌ No registrado");
 
-    return bot.sendMessage(chatId, `💰 $${u.saldo}\n👤 ${u.username}`);
+    return bot.sendMessage(chatId, `💰 Saldo: $${u.saldo}\n👤 ${u.username}`);
+  }
+
+  if (text === "📜 Historial") {
+    let h = historial[chatId] || [];
+    if (h.length === 0) return bot.sendMessage(chatId, "📭 Vacío");
+
+    return bot.sendMessage(chatId, h.join("\n"));
   }
 
   if (text === "🛒 Productos") {
-    let lista = Object.keys(productos);
-    if (lista.length === 0) return bot.sendMessage(chatId, "❌ Vacío");
+    let keys = Object.keys(productos);
+    if (keys.length === 0) return bot.sendMessage(chatId, "❌ No hay productos");
 
-    return bot.sendMessage(chatId, "🛒 Productos:\n" + lista.join("\n"));
+    let botones = keys.map(p => [{ text: p, callback_data: "buy_" + p }]);
+
+    return bot.sendMessage(chatId, "🛒 Elige producto:", {
+      reply_markup: { inline_keyboard: botones }
+    });
   }
+
 });
 
-// CALLBACKS
+// ================= CALLBACKS =================
 bot.on("callback_query", (q) => {
   const chatId = q.message.chat.id;
   const data = q.data;
-
   let s = state[chatId];
 
-  // DURACIONES
+  // DURACIÓN
   if (data.startsWith("dur_")) {
     let dur = data.replace("dur_", "");
 
@@ -203,20 +241,52 @@ bot.on("callback_query", (q) => {
 
     s.tempDur = dur;
     s.step = "precio";
-
     return bot.sendMessage(chatId, `💰 Precio para ${dur} días:`);
   }
 
-  // USUARIOS CLICK
+  // COMPRAR
+  if (data.startsWith("buy_")) {
+    let prod = data.replace("buy_", "");
+    let opciones = productos[prod];
+
+    let botones = Object.entries(opciones).map(([d, p]) => [
+      { text: `${d} días - $${p}`, callback_data: `final_${prod}_${d}` }
+    ]);
+
+    return bot.sendMessage(chatId, "Elige duración:", {
+      reply_markup: { inline_keyboard: botones }
+    });
+  }
+
+  // FINAL COMPRA
+  if (data.startsWith("final_")) {
+    let [_, prod, dur] = data.split("_");
+    let precio = parseFloat(productos[prod][dur]);
+
+    let u = users[chatId];
+    if (!u) return bot.sendMessage(chatId, "❌ No registrado");
+
+    if (u.saldo < precio)
+      return bot.sendMessage(chatId, "❌ Saldo insuficiente");
+
+    u.saldo -= precio;
+
+    if (!historial[chatId]) historial[chatId] = [];
+    historial[chatId].push(`🛒 ${prod} - ${dur} días - $${precio}`);
+
+    return bot.sendMessage(chatId, "✅ Compra realizada");
+  }
+
+  // USUARIOS ADMIN
   if (data.startsWith("user_")) {
     let id = data.replace("user_", "");
 
-    return bot.sendMessage(chatId, "⚙️ Opciones:", {
+    return bot.sendMessage(chatId, "Opciones:", {
       reply_markup: {
         inline_keyboard: [
           [{ text: "💰 Saldo", callback_data: "saldo_" + id }],
-          [{ text: "✏️ Cambiar pass", callback_data: "pass_" + id }],
-          [{ text: "👤 Cambiar user", callback_data: "name_" + id }],
+          [{ text: "✏️ Pass", callback_data: "pass_" + id }],
+          [{ text: "👤 Username", callback_data: "name_" + id }],
           [{ text: "🗑 Eliminar", callback_data: "del_" + id }]
         ]
       }
@@ -235,6 +305,7 @@ bot.on("callback_query", (q) => {
     bot.sendMessage(chatId, "✔️ Listo");
   }
 
+  // RECHAZAR
   if (data.startsWith("no_")) {
     let id = data.replace("no_", "");
     delete solicitudes[id];
@@ -242,9 +313,10 @@ bot.on("callback_query", (q) => {
     bot.sendMessage(id, "❌ Rechazado");
     bot.sendMessage(chatId, "❌ Eliminado");
   }
+
 });
 
-// EXTRA STEPS
+// ================= EXTRA =================
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
   let s = state[chatId];
@@ -260,9 +332,8 @@ bot.on("message", (msg) => {
   if (s.step === "precio") {
     productos[s.prod][s.tempDur] = msg.text;
     s.step = null;
-
     return bot.sendMessage(chatId, "✅ Precio agregado");
   }
 });
 
-console.log("Bot PRO activo 🚀");
+console.log("Bot FULL funcionando 🚀");
